@@ -53,88 +53,93 @@
     jporgand 12/6/2018
 #>
 
+[CmdletBinding()]
 param (
-	
-	#Company logo that will be displayed on the left, can be URL or UNC
-	[Parameter(ValueFromPipeline = $true, HelpMessage = "Enter URL or UNC path to Company Logo")]
-	[String]$CompanyLogo = "",
-	#Logo that will be on the right side, UNC or URL
+    [Parameter(ValueFromPipeline = $true, HelpMessage = "Enter URL or UNC path to Company Logo")]
+    [String]$CompanyLogo = "",
 
-	[Parameter(ValueFromPipeline = $true, HelpMessage = "Enter URL or UNC path for Side Logo")]
-	[String]$RightLogo = "https://www.psmpartners.com/wp-content/uploads/2017/10/porcaro-stolarek-mete.png",
-	#Title of generated report
+    [Parameter(ValueFromPipeline = $true, HelpMessage = "Enter URL or UNC path for Side Logo")]
+    [String]$RightLogo = "https://www.psmpartners.com/wp-content/uploads/2017/10/porcaro-stolarek-mete.png",
 
-	[Parameter(ValueFromPipeline = $true, HelpMessage = "Enter desired title for report")]
-	[String]$ReportTitle = "Active Directory Report",
-	#Location the report will be saved to
+    [Parameter(ValueFromPipeline = $true, HelpMessage = "Enter desired title for report")]
+    [String]$ReportTitle = "Active Directory Report",
 
-	[Parameter(ValueFromPipeline = $true, HelpMessage = "Enter desired directory path to save; Default: C:\Automation\")]
-	[String]$ReportSavePath = "C:\Automation\",
-	#Find users that have not logged in X Amount of days, this sets the days
+    [Parameter(ValueFromPipeline = $true, HelpMessage = "Enter desired directory path to save; Default: C:\Automation\")]
+    [String]$ReportSavePath = "C:\Automation\",
 
-	[Parameter(ValueFromPipeline = $true, HelpMessage = "Users that have not logged on in more than [X] days. amount of days; Default: 30")]
-	$Days = 30,
-	#Get users who have been created in X amount of days and less
+    [Parameter(ValueFromPipeline = $true, HelpMessage = "Users that have not logged on in more than [X] days. amount of days; Default: 30")]
+    [int]$Days = 30,
 
-	[Parameter(ValueFromPipeline = $true, HelpMessage = "Users that have been created within [X] amount of days; Default: 7")]
-	$UserCreatedDays = 7,
-	#Get users whos passwords expire in less than X amount of days
+    [Parameter(ValueFromPipeline = $true, HelpMessage = "Users that have been created within [X] amount of days; Default: 7")]
+    [int]$UserCreatedDays = 7,
 
-	[Parameter(ValueFromPipeline = $true, HelpMessage = "Users password expires within [X] amount of days; Default: 7")]
-	$DaysUntilPWExpireINT = 7,
-	#Get AD Objects that have been modified in X days and newer
+    [Parameter(ValueFromPipeline = $true, HelpMessage = "Users password expires within [X] amount of days; Default: 7")]
+    [int]$DaysUntilPWExpireINT = 7,
 
-	[Parameter(ValueFromPipeline = $true, HelpMessage = "AD Objects that have been modified within [X] amount of days; Default: 3")]
-	$ADModNumber = 3
-	
-	#CSS template located C:\Program Files\WindowsPowerShell\Modules\ReportHTML\1.4.1.1\
-	#Default template is orange and named "Sample"
+    [Parameter(ValueFromPipeline = $true, HelpMessage = "AD Objects that have been modified within [X] amount of days; Default: 3")]
+    [int]$ADModNumber = 3,
+
+    [Parameter(Mandatory=$false, HelpMessage = "vCenter Server Address")]
+    [String]$VCenterServer
 )
 
-ipmo VMware.VimAutomation.Core
+# Helper Function for Logging
+function Write-Log {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Message,
+        [Parameter(Mandatory=$false)]
+        [ValidateSet("Info","Warning","Error","Success")]
+        [string]$Level = "Info"
+    )
 
-Write-Host "Gathering Report Customization..." -ForegroundColor White
-Write-Host "__________________________________" -ForegroundColor White
-(Write-Host -NoNewline "Company Logo (left): " -ForegroundColor Yellow), (Write-Host  $CompanyLogo -ForegroundColor White)
-(Write-Host -NoNewline "Company Logo (right): " -ForegroundColor Yellow), (Write-Host  $RightLogo -ForegroundColor White)
-(Write-Host -NoNewline "Report Title: " -ForegroundColor Yellow), (Write-Host  $ReportTitle -ForegroundColor White)
-(Write-Host -NoNewline "Report Save Path: " -ForegroundColor Yellow), (Write-Host  $ReportSavePath -ForegroundColor White)
-(Write-Host -NoNewline "Amount of Days from Last User Logon Report: " -ForegroundColor Yellow), (Write-Host  $Days -ForegroundColor White)
-(Write-Host -NoNewline "Amount of Days for New User Creation Report: " -ForegroundColor Yellow), (Write-Host  $UserCreatedDays -ForegroundColor White)
-(Write-Host -NoNewline "Amount of Days for User Password Expiration Report: " -ForegroundColor Yellow), (Write-Host  $DaysUntilPWExpireINT -ForegroundColor White)
-(Write-Host -NoNewline "Amount of Days for Newly Modified AD Objects Report: " -ForegroundColor Yellow), (Write-Host  $ADModNumber -ForegroundColor White)
-Write-Host "__________________________________" -ForegroundColor White
+    $Color = switch($Level) {
+        "Info"    { "White" }
+        "Warning" { "Yellow" }
+        "Error"   { "Red" }
+        "Success" { "Green" }
+    }
 
-function LastLogonConvert ($ftDate)
-{
-	
-	$Date = [DateTime]::FromFileTime($ftDate)
-	
-	if ($Date -lt (Get-Date '1/1/1900') -or $date -eq 0 -or $date -eq $null)
-	{
-		
-		"Never"
-	}
-	
-	else
-	{
-		
-		$Date
-	}
-	
-} #End function LastLogonConvert
-
-#Check for ReportHTML Module
-$Mod = Get-Module -ListAvailable -Name "ReportHTML"
-
-If ($null -eq $Mod)
-{
-	
-	Write-Host "ReportHTML Module is not present, attempting to install it"
-	
-	Install-Module -Name ReportHTML -Force
-	Import-Module ReportHTML -ErrorAction SilentlyContinue
+    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [$Level] $Message" -ForegroundColor $Color
 }
+
+function Convert-LastLogon {
+    param([int64]$ftDate)
+
+    try {
+        $Date = [DateTime]::FromFileTime($ftDate)
+        if ($Date -lt (Get-Date '1/1/1900') -or $ftDate -eq 0 -or $null -eq $ftDate) {
+            return "Never"
+        }
+        return $Date
+    }
+    catch {
+        return "Never"
+    }
+}
+
+# Module Checks
+if (-not (Get-Module -ListAvailable -Name "ReportHTML")) {
+    Write-Log -Message "ReportHTML Module is not present, attempting to install it..." -Level Warning
+    try {
+        Install-Module -Name ReportHTML -Force -ErrorAction Stop
+        Import-Module ReportHTML -ErrorAction Stop
+        Write-Log -Message "ReportHTML Module installed and imported successfully." -Level Success
+    }
+    catch {
+        Write-Log -Message "Failed to install/import ReportHTML Module. Error: $_" -Level Error
+        exit
+    }
+} else {
+    Import-Module ReportHTML -ErrorAction SilentlyContinue
+}
+
+Write-Log -Message "Gathering Report Customization..." -Level Info
+Write-Log -Message "Company Logo (left): $CompanyLogo"
+Write-Log -Message "Company Logo (right): $RightLogo"
+Write-Log -Message "Report Title: $ReportTitle"
+Write-Log -Message "Report Save Path: $ReportSavePath"
 
 #Array of default Security Groups
 $DefaultSGs = @(
@@ -233,7 +238,8 @@ $EsxiHostTable  = New-Object 'System.Collections.Generic.List[System.Object]'
 
 
 #Get all users right away. Instead of doing several lookups, we will use this object to look up all the information needed.
-$AllUsers = Get-ADUser -Filter * -Properties *
+Write-Log -Message "Collecting Users..."
+$AllUsers = Get-ADUser -Filter * -Properties Name, Enabled, whenCreated, LastLogon, PasswordNeverExpires, PasswordLastSet, PasswordNotRequired, SamAccountName, EmailAddress, AccountExpirationDate, DistinguishedName, UserPrincipalName, ProtectedFromAccidentalDeletion, PasswordExpired, msDS-UserPasswordExpiryTimeComputed | Select-Object *, @{Name="PasswordExpiryTime";Expression={[datetime]::FromFileTime($_."msDS-UserPasswordExpiryTimeComputed")}}
 
 $GPOs = Get-GPO -All | Select-Object DisplayName, GPOStatus, ModificationTime, @{ Label = "ComputerVersion"; Expression = { $_.computer.dsversion } }, @{ Label = "UserVersion"; Expression = { $_.user.dsversion } }
 
@@ -450,7 +456,7 @@ if (($DefaultComputersinDefaultOUTable).Count -eq 0)
 }
 
 $DefaultUsersOU = (Get-ADDomain).UsersContainer
-$DefaultUsers = $Allusers | Where-Object { $_.DistinguishedName -like "*$($DefaultUsersOU)" } | Select-Object Name, UserPrincipalName, Enabled, ProtectedFromAccidentalDeletion, EmailAddress, @{ Name = 'lastlogon'; Expression = { LastLogonConvert $_.lastlogon } }, DistinguishedName
+$DefaultUsers = $Allusers | Where-Object { $_.DistinguishedName -like "*$($DefaultUsersOU)" } | Select-Object Name, UserPrincipalName, Enabled, ProtectedFromAccidentalDeletion, EmailAddress, @{ Name = 'lastlogon'; Expression = { Convert-LastLogon $_.lastlogon } }, DistinguishedName
 
 foreach ($DefaultUser in $DefaultUsers)
 {
@@ -569,10 +575,11 @@ Write-Host "Done!" -ForegroundColor White
 
 ############################>
 
-Write-Host "Working on Groups Report..." -ForegroundColor Green
+Write-Log -Message "Working on Groups Report..." -Level Info
 
 #Get groups and sort in alphabetical order
-$Groups = Get-ADGroup -Filter * -Properties *
+Write-Log -Message "Collecting Groups..."
+$Groups = Get-ADGroup -Filter * -Properties mail, GroupCategory, ProtectedFromAccidentalDeletion, ManagedBy
 $SecurityCount = 0
 $MailSecurityCount = 0
 $CustomGroup = 0
@@ -587,7 +594,7 @@ foreach ($Group in $Groups)
 	
 	$DefaultADGroup = 'False'
 	$Type = New-Object 'System.Collections.Generic.List[System.Object]'
-	$Gemail = (Get-ADGroup $Group -Properties mail).mail
+	$Gemail = $Group.mail
 	
 	if (($group.GroupCategory -eq "Security") -and ($Gemail -ne $Null))
 	{
@@ -799,7 +806,7 @@ Write-Host "Done!" -ForegroundColor White
 
 ############################>
 
-Write-Host "Working on Organizational Units Report..." -ForegroundColor Green
+Write-Log -Message "Working on Organizational Units Report..." -Level Info
 
 #Get all OUs'
 $OUs = Get-ADOrganizationalUnit -Filter * -Properties *
@@ -911,7 +918,7 @@ Write-Host "Done!" -ForegroundColor White
 
 ############################>
 
-Write-Host "Working on Users Report..." -ForegroundColor Green
+Write-Log -Message "Working on Users Report..." -Level Info
 
 $UserEnabled = 0
 $UserDisabled = 0
@@ -930,46 +937,23 @@ $userphaventloggedonrecentlytable = New-Object 'System.Collections.Generic.List[
 foreach ($User in $AllUsers)
 {
 	
-	$AttVar = $User | Select-Object Enabled, PasswordExpired, PasswordLastSet, PasswordNeverExpires, PasswordNotRequired, Name, SamAccountName, EmailAddress, AccountExpirationDate, @{ Name = 'lastlogon'; Expression = { LastLogonConvert $_.lastlogon } }, DistinguishedName
-	$maxPasswordAge = (Get-ADDefaultDomainPasswordPolicy).MaxPasswordAge.Days
-	
-	if ((($AttVar.PasswordNeverExpires) -eq $False) -and (($AttVar.Enabled) -ne $false))
-	{
-		
-		#Get Password last set date
-		$passwordSetDate = ($User | ForEach-Object { $_.PasswordLastSet })
-		
-		if ($null -eq $passwordSetDate)
-		{
-			
-			$daystoexpire = "User has never logged on"
-		}
-		
-		else
-		{
-			
-			#Check for Fine Grained Passwords
-			$PasswordPol = (Get-ADUserResultantPasswordPolicy $user)
-			
-			if (($PasswordPol) -ne $null)
-			{
-				
-				$maxPasswordAge = ($PasswordPol).MaxPasswordAge
-			}
-			
-			$expireson = $passwordsetdate.AddDays($maxPasswordAge)
-			$today = (Get-Date)
-			
-			#Gets the count on how many days until the password expires and stores it in the $daystoexpire var
-			$daystoexpire = (New-TimeSpan -Start $today -End $Expireson).Days
-		}
-	}
-	
-	else
-	{
-		
-		$daystoexpire = "N/A"
-	}
+	$AttVar = $User | Select-Object Enabled, PasswordExpired, PasswordLastSet, PasswordNeverExpires, PasswordNotRequired, Name, SamAccountName, EmailAddress, AccountExpirationDate, @{ Name = 'lastlogon'; Expression = { Convert-LastLogon $_.lastlogon } }, DistinguishedName
+    if ($AttVar.PasswordNeverExpires -eq $False -and $AttVar.Enabled -eq $True)
+    {
+        if ($User.msDS-UserPasswordExpiryTimeComputed -eq 9223372036854775807) {
+             $daystoexpire = "N/A"
+        }
+        elseif ($null -eq $User.PasswordLastSet) {
+             $daystoexpire = "User has never set password"
+        }
+        else {
+             $daystoexpire = (New-TimeSpan -Start (Get-Date) -End $User.PasswordExpiryTime).Days
+        }
+    }
+    else
+    {
+        $daystoexpire = "N/A"
+    }
 	
 	if (($User.Enabled -eq $True) -and ($AttVar.LastLogon -lt ((Get-Date).AddDays(- $Days))) -and ($User.LastLogon -ne $NULL))
 	{
@@ -1187,7 +1171,7 @@ Write-Host "Done!" -ForegroundColor White
 	   Group Policy
 
 ############################>
-Write-Host "Working on Group Policy Report..." -ForegroundColor Green
+Write-Log -Message "Working on Group Policy Report..." -Level Info
 
 $GPOTable = New-Object 'System.Collections.Generic.List[System.Object]'
 
@@ -1220,9 +1204,10 @@ Write-Host "Done!" -ForegroundColor White
 	   Computers
 
 ############################>
-Write-Host "Working on Computers Report..." -ForegroundColor Green
+Write-Log -Message "Working on Computers Report..." -Level Info
 
-$Computers = Get-ADComputer -Filter * -Properties *
+Write-Log -Message "Collecting Computers..."
+$Computers = Get-ADComputer -Filter * -Properties OperatingSystem, ProtectedFromAccidentalDeletion, PasswordLastSet, Modified, Enabled
 $ComputersProtected = 0
 $ComputersNotProtected = 0
 $ComputerEnabled = 0
@@ -1348,135 +1333,124 @@ $ComputersEnabledTable.Add($objULic)
 
 Write-Host "Done!" -ForegroundColor White
 
-Write-Host "Working on VMware Report..." -ForegroundColor Green
+Write-Log -Message "Working on VMware Report..." -Level Info
 
-$VCenterServer = $NULL
-if ($VCenterServer -eq $NULL)
-    {  $VCenterServer = Read-Host -Prompt 'No hard-coded vCenter server name in script, prompting interactively for vCenter Server Name' }
+if (-not [string]::IsNullOrWhiteSpace($VCenterServer)) {
+    try {
+        Write-Log -Message "Connecting to vCenter: $VCenterServer"
+        Connect-VIServer -Server $VCenterServer -ErrorAction Stop
+        
+        Write-Log -Message "Collecting Datastores..."
+        $Datastores = Get-Datastore
+        foreach ($DS in $Datastores) {
+            $DatastoreTable.Add([PSCustomObject]@{
+                'Name'        = $DS.Name
+                'FreeSpaceGB' = [math]::Round($DS.FreeSpaceGB, 2)
+                'CapacityGB'  = [math]::Round($DS.CapacityGB, 2)
+            })
+        }
+        if ($DatastoreTable.Count -eq 0) {
+             $DatastoreTable.Add([PSCustomObject]@{ 'Information' = 'No datastores found' })
+        }
 
-Connect-ViServer $VCenterServer
-$MasterVMList = Get-VM
+        Write-Log -Message "Collecting PortGroups..."
+        $PortGroups = Get-VirtualPortGroup
+        foreach ($PG in $PortGroups) {
+             $PortGroupTable.Add([PSCustomObject]@{
+                 'Name'          = $PG.Name
+                 'VLanID'        = $PG.VLanId
+                 'VirtualSwitch' = $PG.VirtualSwitch
+             })
+        }
+         if ($PortGroupTable.Count -eq 0) {
+             $PortGroupTable.Add([PSCustomObject]@{ 'Information' = 'No port groups found' })
+        }
 
-$AllVirtualMachines = $MasterVMList | select Name,Guest,NumCPU,MemoryGB,ProvisionedSpaceGB,VMHost
-$AllVirtualMachines | %  {  
+        Write-Log -Message "Collecting ESXi Hosts..."
+        $VMHosts = Get-VMHost
+        foreach ($HostObj in $VMHosts) {
+             $EsxiHostTable.Add([PSCustomObject]@{
+                 'Name'            = $HostObj.Name
+                 'ConnectionState' = $HostObj.ConnectionState
+                 'PowerState'      = $HostObj.PowerState
+                 'Version'         = $HostObj.Version
+                 'CpuUsageMhz'     = $HostObj.CpuUsageMhz
+                 'MemoryUsageGB'   = $HostObj.MemoryUsageGB
+             })
+        }
+         if ($EsxiHostTable.Count -eq 0) {
+             $EsxiHostTable.Add([PSCustomObject]@{ 'Information' = 'No ESXi hosts found' })
+        }
 
-	$obj = [PSCustomObject]@{
-		'Name'	      = $_.Name
-		'Guest' = $_.Guest
-		'NumCPU' = $_.NumCPU
-	     'MemoryGB'	      = $_.MemoryGB
-		'ProvisionedSpaceGB' = $_.ProvisionedSpaceGB
-		'VMHost' = $_.VMHost	
-	}
-$VmwareVmList.Add($obj)}
+        Write-Log -Message "Collecting VMs..."
+        $MasterVMList = Get-VM
+        foreach ($VM in $MasterVMList) {
+            $VmwareVmList.Add([PSCustomObject]@{
+                'Name'               = $VM.Name
+                'Guest'              = $VM.Guest.StartWith
+                'NumCPU'             = $VM.NumCPU
+                'MemoryGB'           = $VM.MemoryGB
+                'ProvisionedSpaceGB' = $VM.ProvisionedSpaceGB
+                'VMHost'             = $VM.VMHost.Name
+            })
+        }
+        
+        Write-Log -Message "Checking VMware Tools..."
+        $Outdated = $MasterVMList | Where-Object { $_.PowerState -ne "PoweredOff" -and $_.ExtensionData.Guest.ToolsStatus -ne "toolsOk" }
+        foreach ($VM in $Outdated) {
+             $OutdatedVMwareTools.Add([PSCustomObject]@{
+                'Name'         = $VM.Name
+                'Guest'        = $VM.Guest.ToString()
+                'ToolsVersion' = $VM.ExtensionData.Guest.ToolsVersion
+             })
+        }
+        if ($OutdatedVMwareTools.Count -eq 0) {
+             $OutdatedVMwareTools.Add([PSCustomObject]@{ 'Information' = 'All VMs have up-to-date Tools' })
+        }
 
-$OutofDate = $MasterVMList | where {$_.PowerState -ne "PoweredOff" -and $_.ExtensionData.Guest.ToolsStatus -ne "toolsOk"}
-$ResultantSet = @($OutofDate | select Name,Guest,@{Name="ToolsVersion";Expression={$_.ExtensionData.Guest.Toolsversion}})
- $ResultantSet | %  {  
+        Write-Log -Message "Checking Snapshots..."
+        $Snaps = Get-Snapshot -VM $MasterVMList -ErrorAction SilentlyContinue
+        foreach ($Snap in $Snaps) {
+             $OpenSnapshotTable.Add([PSCustomObject]@{
+                 'Guest'              = $Snap.VM.Name
+                 'Name'               = $Snap.Name
+                 'SizeGB'             = [math]::Round($Snap.SizeGB, 2)
+                 'Created'            = $Snap.Created
+             })
+        }
+        if ($OpenSnapshotTable.Count -eq 0) {
+             $OpenSnapshotTable.Add([PSCustomObject]@{ 'Information' = 'No open snapshots' })
+        }
 
-	$obj = [PSCustomObject]@{
-		'Name'	      = $_.Name
-		'Guest' = $_.Guest
-		'ToolsVersion' = $_.ToolsVersion
-	}
+        Write-Log -Message "Collecting Alarms..."
+        $Alarms = Get-VIEvent -MaxSamples 100 -ErrorAction SilentlyContinue | Where-Object { $_.FullFormattedMessage -like "*alarm*" }
+        foreach ($Alarm in $Alarms) {
+             $VcenterAlarmTable.Add([PSCustomObject]@{
+                 'Username'             = $Alarm.Username
+                 'FullFormattedMessage' = $Alarm.FullFormattedMessage
+                 'CreatedTime'          = $Alarm.CreatedTime
+             })
+        }
+         if ($VcenterAlarmTable.Count -eq 0) {
+             $VcenterAlarmTable.Add([PSCustomObject]@{ 'Information' = 'No recent alarms' })
+        }
 
-$OutdatedVMwareTools.Add($obj);
+    } catch {
+        Write-Log -Message "Error collecting VMware data: $_" -Level Error
+    }
+} else {
+    Write-Log -Message "No vCenter Server specified. Skipping VMware collection." -Level Warning
+    $TablesToSkip = @($VmwareVmList, $OutdatedVMwareTools, $OpenSnapshotTable, $DatastoreTable, $PortGroupTable, $VcenterAlarmTable, $EsxiHostTable)
+    foreach ($T in $TablesToSkip) {
+        $T.Add([PSCustomObject]@{ 'Information' = 'VMware Collection Skipped' })
+    }
 }
 
-If (($OutdatedVMwareTools).count -eq 0)
-{
-	$OutdatedVMwareTools = [PSCustomObject]@{
-		'Information' = 'All virtual machines have up-to-date VMWare Tools installations'
-	}
-}
-
-$Snapshots = $MasterVMList | Get-Snapshot | select Guest,NumCPU,MemoryGB,ProvisionedSpaceGB
- 
- $Snapshots | %  {  
-
-	$obj = [PSCustomObject]@{
-		'Guest'	      = $_.Guest
-		'NumcPU' = $_.NumcPU
-		'MemoryGB' = $_.MemoryGB
-	    'ProvisionedSpaceGB'= $_.ProvisionedSpaceGB
-	}
-
-$OpenSnapshotTable.Add($obj);
-}
-
-If (($OpenSnapshotTable).count -eq 0)
-{
-	$OpenSnapshotTable = [PSCustomObject]@{
-		'Information' = 'There are no open VMWare Snapshots'
-	}
-}
-
-$AllDatastores = Get-Datastore | select Name, FreeSpaceGB, CapacityGB
- 
- $AllDatastores | %  {  
-
-	$obj = [PSCustomObject]@{
-		'Name'	      = $_.Name
-		'FreeSpaceGB' = $_.FreeSpaceGB
-		'CapacityGB' = $_.CapacityGB
-	}
-
-$DatastoreTable.Add($obj);
-}
-
-If (($DatastoreTable).count -eq 0)
-{
-	$DatastoreTable = [PSCustomObject]@{
-		'Information' = 'No datastores were found in the virtual infrastructure'
-	}
-}
-
-$AllPortGroups = Get-VirtualPortGroup | select Name, VLanID, VirtualSwitch
- 
- $AllPortGroups | %  {  
-
-	$obj = [PSCustomObject]@{
-		'Name'	      = $_.Name
-		'VLanID' = $_.VLanID
-		'VirtualSwitch' = $_.VirtualSwitch
-	}
-
-$PortGroupTable.Add($obj);
-}
-
-If (($PortGroupTable).count -eq 0)
-{
-	$PortGroupTable = [PSCustomObject]@{
-		'Information' = 'No port groups were found in the virtual infrastructure'
-	}
-}
-
-$AllVcenterAlarms = Get-VIEvent | select Username, FullFormattedMessage, CreatedTime
- 
- $AllVcenterAlarms | %  {  
-
-	$obj = [PSCustomObject]@{
-		'Username'	      = $_.Username
-		'FullFormattedMessage' = $_.FullFormattedMessage
-		'CreatedTime' = $_.CreatedTime
-
-	}
-
-$VcenterAlarmTable.Add($obj);
-}
-
-If (($VcenterAlarmTable).count -eq 0)
-{
-	$VcenterAlarmTable = [PSCustomObject]@{
-		'Information' = 'No recent vCenter alarms found.'
-	}
-}
-
-Write-Host "Done!" -ForegroundColor White
+Write-Log -Message "Done with VMware Data Collection." -Level Success
 
 $tabarray = @('Dashboard', 'Groups', 'Organizational Units', 'Users', 'Group Policy', 'Computers', 'VM Infrastructure')
 
-Write-Host "Compiling Report..." -ForegroundColor Green
+Write-Log -Message "Compiling Report..." -Level Info
 
 ##--OU Protection PIE CHART--##
 #Basic Properties 
